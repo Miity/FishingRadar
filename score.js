@@ -11,7 +11,7 @@ const REF_NEW_MOON = Date.UTC(2000, 0, 6, 18, 14);
 export const MODEL = {
   light: { sigmaMin: 50, gain: 1.0 },              // dawn/dusk bump, up to x2
   temp: {
-    sea: { opt: 19, sigma: 5 },                    // °C, sea surface temperature
+    sea: { opt: 19, sigma: 7 },                    // °C, sea surface temperature
     fresh: { opt: 18, sigma: 6 },                  // °C, 72 h mean air temp as water proxy
     floor: 0.3,
     shockC: 3,                                     // 24 h change that costs ~40%

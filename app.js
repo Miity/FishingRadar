@@ -1,5 +1,6 @@
 // UI: data fetching (Open-Meteo), rendering, interaction. Scoring lives in score.js.
-import { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } from './score.js';
+// Same ?v= as app.js (set in index.html), so a cached score.js never mixes with a new app.js.
+const { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } = await import(`./score.js${new URL(import.meta.url).search}`);
 
 const HOUR = 3600e3, DAYS = 10;
 const $ = (s) => document.querySelector(s);
@@ -94,6 +95,7 @@ function render() {
 const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i] }; };
 
 function riseWarning(hs) {
+  if (mode !== 'spear') return '';
   const h = hs.find((x) => !x.night && x.rise >= MODEL.spear.riseWarn);
   return h ? `<p class="warn">⚠ Хвиля зростає: +${h.rise.toFixed(1)} м за 3 год від ${hh(h.t)}. Не заходьте у воду на підйомі хвилі.</p>` : '';
 }
@@ -107,7 +109,10 @@ function windows(hs) {
     if (last && h.t - last.end === HOUR) last.end = h.t;
     else out.push({ start: h.t, end: h.t });
   }
-  return out.map((w) => `${hh(w.start)}–${hh(w.end + HOUR)}`);
+  const day = new Date(hs[0].t).toISOString().slice(0, 10);
+  const sunset = mode === 'spear' && data.sunset.find((t) => new Date(t).toISOString().startsWith(day));
+  const hm = (t) => new Date(t).toISOString().slice(11, 16);
+  return out.map((w) => `${hm(w.start)}–${hm(sunset ? Math.min(w.end + HOUR, sunset) : w.end + HOUR)}`);
 }
 
 function showFactors(h) {

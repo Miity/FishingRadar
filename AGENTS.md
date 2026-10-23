@@ -49,6 +49,7 @@ Shore-entry breath-hold spearfishing. Built from the user's field notes (Gaeta) 
 
 ## Conventions
 - Code, identifiers, comments: English. UI text: Ukrainian.
+- Bump `?v=` on `app.js` in `index.html` on every JS change: `app.js` passes it on to `score.js`, so a cached file never mixes versions (GitHub Pages caches ~10 min).
 - `localStorage` only for per-viewer conveniences (last location, mode), always inside try/catch.
 - Mark deliberate shortcuts with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Don't copy code, assets or texts from Fishing Points or other commercial apps.
