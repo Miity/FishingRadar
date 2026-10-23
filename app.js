@@ -1,6 +1,8 @@
-// UI: data fetching (Open-Meteo), rendering, interaction. Scoring lives in score.js.
-// Same ?v= as app.js (set in index.html), so a cached score.js never mixes with a new app.js.
-const { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } = await import(`./score.js${new URL(import.meta.url).search}`);
+// UI: rendering, interaction, localStorage. Scoring lives in score.js, Open-Meteo calls in openmeteo.js.
+// Same ?v= as app.js (set in index.html), so cached modules never mix with a new app.js.
+const ver = new URL(import.meta.url).search;
+const { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } = await import(`./score.js${ver}`);
+const { api, getJson, fetchConditions } = await import(`./openmeteo.js${ver}`);
 
 const HOUR = 3600e3, DAYS = 10;
 const $ = (s) => document.querySelector(s);
@@ -12,9 +14,6 @@ let place = store.get('place', { name: 'Gaeta, Lazio', lat: 41.2138, lon: 13.571
 let mode = store.get('mode', 'sea');
 let data, daily = [], selected = 0, nowLocal = 0;
 
-const api = (host, path, params) => `https://${host}/v1/${path}?${new URLSearchParams(params)}`;
-const getJson = async (url) => { const r = await fetch(url); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); };
-const ms = (s) => Date.parse(s + 'Z');
 const hh = (t) => String(new Date(t).getUTCHours()).padStart(2, '0') + ':00';
 const fmt = (v, unit, d = 1) => (v == null ? '—' : v.toFixed(d) + unit);
 const status = (s) => ($('#status').textContent = s);
@@ -35,28 +34,7 @@ async function load() {
   $('#place').textContent = place.name;
   document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.mode === mode));
   try {
-    const common = { latitude: place.lat, longitude: place.lon, timezone: 'auto', past_days: 3, forecast_days: DAYS };
-    const [fc, marine] = await Promise.all([
-      getJson(api('api.open-meteo.com', 'forecast', { ...common, hourly: 'temperature_2m,wind_speed_10m', daily: 'sunrise,sunset', wind_speed_unit: 'ms' })),
-      mode !== 'fresh'
-        ? getJson(api('marine-api.open-meteo.com', 'marine', { ...common, hourly: 'sea_surface_temperature,wave_height,wave_period,sea_level_height_msl,ocean_current_velocity' })).catch(() => null)
-        : null,
-    ]);
-    const idx = new Map((marine?.hourly?.time ?? []).map((s, i) => [s, i]));
-    const fromMarine = (k) => fc.hourly.time.map((s) => marine?.hourly?.[k]?.[idx.get(s)] ?? null);
-    data = {
-      time: fc.hourly.time.map(ms),
-      utcOffsetMs: fc.utc_offset_seconds * 1000,
-      airTemp: fc.hourly.temperature_2m,
-      wind: fc.hourly.wind_speed_10m,
-      sst: fromMarine('sea_surface_temperature'),
-      wave: fromMarine('wave_height'),
-      period: fromMarine('wave_period'),
-      seaLevel: fromMarine('sea_level_height_msl'),
-      current: fromMarine('ocean_current_velocity').map((v) => (v == null ? null : v / 3.6)), // km/h -> m/s
-      sunrise: fc.daily.sunrise.map(ms),
-      sunset: fc.daily.sunset.map(ms),
-    };
+    data = await fetchConditions(place, { past_days: 3, forecast_days: DAYS }, mode !== 'fresh');
     nowLocal = Date.now() + data.utcOffsetMs;
     const today = new Date(nowLocal).toISOString().slice(0, 10);
     const best = mode === 'spear' ? MODEL.spear.bestHours : MODEL.bestHours;
@@ -184,6 +162,22 @@ function bindHover(hs) {
   svg.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.style.display = 'none'; });
 }
 
+// Dive log from dives.json (added with add-dive.mjs), re-scored with the current model.
+function renderDives(dives) {
+  const avg = (a) => { const x = a.filter((v) => v != null); return x.length ? x.reduce((s, v) => s + v, 0) / x.length : null; };
+  $('#dives').innerHTML = dives.length ? '<h2>Журнал занурень</h2><ul>' + dives.slice().reverse().map((d) => {
+    const iso = (t) => new Date(t).toISOString();
+    const idx = d.data.time.map((t, i) => [iso(t), i]).filter(([s]) => s.startsWith(d.date) && s.slice(11, 16) >= d.from.slice(0, 2) + ':00' && s.slice(11, 16) < d.to).map(([, i]) => i);
+    const hs = hourlyScores(d.data, 'spear');
+    const at = (k) => avg(idx.map((i) => d.data[k][i]));
+    const score = avg(idx.map((i) => hs[i].score));
+    return `<li><b>${d.date.slice(8)}.${d.date.slice(5, 7)}.${d.date.slice(0, 4)}</b> · ${esc(d.place.name)} · ${d.from}–${d.to}
+      <span class="stars">${'★'.repeat(d.rating)}${'☆'.repeat(5 - d.rating)}</span><br>
+      <span class="sub">Модель ${score == null ? '—' : Math.round(score)} · хвиля ${fmt(at('wave'), ' м')} / ${fmt(at('period'), ' с', 0)} · вітер ${fmt(at('wind'), ' м/с')}
+      · течія ${fmt(at('current'), ' м/с')} · вода ${fmt(at('sst'), '°')}</span>${d.note ? `<br>${esc(d.note)}` : ''}</li>`;
+  }).join('') + '</ul>' : '';
+}
+
 function setPlace(p) { place = p; store.set('place', p); $('#results').innerHTML = ''; load(); }
 
 // Only width matters: mobile browsers fire resize on scroll (URL bar), which would reset the hover.
@@ -213,3 +207,4 @@ $('#geo').addEventListener('click', () => navigator.geolocation?.getCurrentPosit
 ));
 
 load();
+getJson(`dives.json${ver}`).then(renderDives).catch(() => {});

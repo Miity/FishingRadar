@@ -9,7 +9,10 @@ Static web page that rates fishing conditions 0–100 per hour and per day (10-d
 
 ## Files
 - `index.html` — markup and styles.
-- `app.js` — data fetching, rendering, interaction (owns the API and localStorage).
+- `app.js` — rendering, interaction, localStorage.
+- `openmeteo.js` — Open-Meteo calls → hourly arrays for `score.js` (shared by `app.js` and `add-dive.mjs`).
+- `dives.json` — the user's dive log: date, from/to, place, rating 1–5, note and raw hourly data (day −3 … +1) so the current model re-scores it. Shown under the forecast. Calibration data for `MODEL.spear`.
+- `add-dive.mjs` — `node add-dive.mjs <date> <from> <to> <lat> <lon> <name> <rating> [note]` appends a dive. The user tells Claude, Claude runs it.
 - `score.js` — pure scoring functions. No DOM, no network. Everything here must be testable in Node.
 - `score.test.js` — `node score.test.js`, plain `node:assert`, synthetic data.
 
@@ -51,7 +54,7 @@ Shore-entry breath-hold spearfishing. Built from the user's field notes (Gaeta) 
 
 ## Conventions
 - Code, identifiers, comments: English. UI text: Ukrainian.
-- Bump `?v=` on `app.js` in `index.html` on every JS change: `app.js` passes it on to `score.js`, so a cached file never mixes versions (GitHub Pages caches ~10 min).
+- Bump `?v=` on `app.js` in `index.html` on every JS change: `app.js` passes it on to `score.js`, `openmeteo.js` and `dives.json`, so a cached file never mixes versions (GitHub Pages caches ~10 min).
 - `localStorage` only for per-viewer conveniences (last location, mode), always inside try/catch.
 - Mark deliberate shortcuts with a `ponytail:` comment naming the ceiling and the upgrade path.
 - Don't copy code, assets or texts from Fishing Points or other commercial apps.
