@@ -12,7 +12,8 @@ const store = {
 };
 let place = store.get('place', { name: 'Gaeta, Lazio', lat: 41.2138, lon: 13.5713 });
 let mode = store.get('mode', 'sea');
-let data, daily = [], selected = 0, nowLocal = 0;
+// fcData: forecast for `place`; data: whatever day is open (forecast or a logged dive). selected: 'f<i>' or 'd<i>'.
+let fcData, data, daily = [], dives = [], selected = 'f0', nowLocal = 0;
 
 const hh = (t) => String(new Date(t).getUTCHours()).padStart(2, '0') + ':00';
 const fmt = (v, unit, d = 1) => (v == null ? '—' : v.toFixed(d) + unit);
@@ -34,13 +35,12 @@ async function load() {
   $('#place').textContent = place.name;
   document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.mode === mode));
   try {
-    data = await fetchConditions(place, { past_days: 3, forecast_days: DAYS }, mode !== 'fresh');
-    nowLocal = Date.now() + data.utcOffsetMs;
+    fcData = await fetchConditions(place, { past_days: 3, forecast_days: DAYS }, mode !== 'fresh');
+    nowLocal = Date.now() + fcData.utcOffsetMs;
     const today = new Date(nowLocal).toISOString().slice(0, 10);
-    const best = mode === 'spear' ? MODEL.spear.bestHours : MODEL.bestHours;
-    daily = dailyScores(hourlyScores(data, mode), best).filter((d) => d.day >= today).slice(0, DAYS);
-    selected = 0;
-    const noSea = mode !== 'fresh' && data.sst.every((v) => v == null) && data.wave.every((v) => v == null);
+    daily = dailyScores(hourlyScores(fcData, mode), bestN()).filter((d) => d.day >= today).slice(0, DAYS).map((d) => ({ ...d, data: fcData }));
+    if (selected[0] === 'f') selected = 'f0';
+    const noSea = mode !== 'fresh' && fcData.sst.every((v) => v == null) && fcData.wave.every((v) => v == null);
     status(noSea ? 'Морських даних для цієї точки немає: хвилі й рух води не враховано, температура води — за повітрям.' : '');
     render();
   } catch (e) {
@@ -48,26 +48,35 @@ async function load() {
   }
 }
 
+const bestN = () => (mode === 'spear' ? MODEL.spear.bestHours : MODEL.bestHours);
+const weekday = (day) => new Date(day + 'T00:00Z').toLocaleDateString('uk', { weekday: 'short', timeZone: 'UTC' });
+const card = (d, key, wd, dn, extra = '') => `<button class="day${key === selected ? ' sel' : ''}" data-k="${key}" aria-label="${wd} ${dn}: ${d.score}">
+  <span class="wd">${wd}</span><span class="dn">${dn}</span><span class="sc">${d.score}</span>
+  <span class="bar"><i style="height:${d.score}%"></i></span>${d.diff ? diffBadge(d.diff) : ''}${extra}</button>`;
+const rating = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+const minutes = (hm) => (+hm.slice(0, 2) * 60 + +hm.slice(3)) * 60e3;
+
 function render() {
-  $('#days').innerHTML = daily.map((d, i) => {
-    const dt = new Date(d.day + 'T00:00Z');
-    const wd = i === 0 ? 'Сьогодні' : dt.toLocaleDateString('uk', { weekday: 'short', timeZone: 'UTC' });
-    return `<button class="day${i === selected ? ' sel' : ''}" data-i="${i}" aria-label="${wd} ${dt.getUTCDate()}: ${d.score}">
-      <span class="wd">${wd}</span><span class="dn">${dt.getUTCDate()}</span><span class="sc">${d.score}</span>
-      <span class="bar"><i style="height:${d.score}%"></i></span>${d.diff ? diffBadge(d.diff) : ''}</button>`;
-  }).join('');
-  const d = daily[selected];
+  $('#days').innerHTML = daily.map((d, i) => card(d, 'f' + i, i === 0 ? 'Сьогодні' : weekday(d.day), new Date(d.day + 'T00:00Z').getUTCDate())).join('');
+  // Logged dives (dives.json, added with add-dive.mjs), scored with the current model and mode.
+  const diveDays = dives.map((v) => ({ ...dailyScores(hourlyScores(v.data, mode), bestN()).find((x) => x.day === v.date), data: v.data, dive: v }));
+  $('#dives').innerHTML = diveDays.length ? `<h2>Журнал занурень</h2><nav>${diveDays.map((d, i) =>
+    card(d, 'd' + i, weekday(d.day), `${d.day.slice(8)}.${d.day.slice(5, 7)}`, `<span class="mine" title="${esc(d.dive.place.name)}">${rating(d.dive.rating)}</span>`)).join('')}</nav>` : '';
+  const d = selected[0] === 'd' ? diveDays[+selected.slice(1)] : daily[+selected.slice(1)];
   if (!d) return;
+  data = d.data;
+  const v = d.dive;
   const best = d.hours.reduce((a, h) => (h.score > a.score ? h : a));
   const phase = moonPhase(d.hours[12 % d.hours.length].t - data.utcOffsetMs);
   $('#detail').innerHTML = `
     <div class="hero"><span class="big">${d.score}</span>
       <span><span class="stars">${'★'.repeat(stars(d.score))}${'☆'.repeat(4 - stars(d.score))}</span><br>
       <span class="sub">${label(d.score)} активність · Місяць: ${MOON[Math.round(phase * 8) % 8]}</span></span></div>
+    ${v ? `<div class="sub">Занурення ${d.day.slice(8)}.${d.day.slice(5, 7)}.${d.day.slice(0, 4)}: ${esc(v.place.name)} · ${v.from}–${v.to} · <span class="stars">${rating(v.rating)}</span>${v.note ? ` · ${esc(v.note)}` : ''}</div>` : ''}
     <div class="sub">Найкращий час: ${windows(d.hours).join(', ')}</div>
     ${d.diff ? `<div class="sub">Складність: ${diffBadge(d.diff)}${d.diff.cause ? ` · ${causeText(d.diff)}` : ''}</div>` : ''}
     ${riseWarning(d.hours)}
-    <div class="chart">${chart(d.hours)}<div id="tip"></div></div>
+    <div class="chart">${chart(d.hours, v)}<div id="tip"></div></div>
     <table id="factors"></table>
     <details><summary>Таблиця по годинах</summary><table>
       <tr><th>Година</th><th>Оцінка</th><th>Вода</th><th>Вітер</th><th>Хвилі</th>${d.diff ? '<th>Течія</th><th>Складність</th>' : ''}</tr>
@@ -119,7 +128,7 @@ const H = 220, L = 8, R = 8, T = 10, B = 24;
 const x = (t, t0) => L + ((t - t0) / HOUR / 23) * (W - L - R);
 const y = (s) => T + (1 - s / 100) * (H - T - B);
 
-function chart(hs) {
+function chart(hs, dive) {
   W = Math.max(280, $('#detail').clientWidth);
   const t0 = Date.parse(new Date(hs[0].t).toISOString().slice(0, 10) + 'T00:00Z');
   const p = hs.map((h) => [x(h.t, t0), y(h.score)]);
@@ -134,12 +143,13 @@ function chart(hs) {
   const day = new Date(t0).toISOString().slice(0, 10);
   const sun = [...data.sunrise, ...data.sunset].filter((t) => new Date(t).toISOString().startsWith(day)).map((t) =>
     `<line x1="${x(t, t0)}" x2="${x(t, t0)}" y1="${T}" y2="${y(0)}" stroke="var(--muted)" stroke-width="1" opacity=".5"/>`).join('');
+  const win = dive ? `<rect x="${x(t0 + minutes(dive.from), t0)}" y="${T}" width="${x(t0 + minutes(dive.to), t0) - x(t0 + minutes(dive.from), t0)}" height="${y(0) - T}" fill="var(--wash)"/>` : '';
   const now = nowLocal >= t0 && nowLocal < t0 + 24 * HOUR
     ? (() => { const h = hs.reduce((a, b) => (Math.abs(b.t - nowLocal) < Math.abs(a.t - nowLocal) ? b : a));
         return `<circle cx="${x(nowLocal, t0)}" cy="${y(h.score)}" r="5" fill="var(--series)" stroke="var(--bg)" stroke-width="2"/>`; })()
     : '';
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Оцінка по годинах">
-    ${grid}${sun}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--grid)"/>
+    ${win}${grid}${sun}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--grid)"/>
     <path d="${area}" fill="var(--wash)"/><path d="${line}" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round"/>
     ${ticks}${now}<line id="cross" y1="${T}" y2="${y(0)}" stroke="var(--text-2)" stroke-width="1" visibility="hidden"/>
     <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/></svg>`;
@@ -162,29 +172,13 @@ function bindHover(hs) {
   svg.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); tip.style.display = 'none'; });
 }
 
-// Dive log from dives.json (added with add-dive.mjs), re-scored with the current model.
-function renderDives(dives) {
-  const avg = (a) => { const x = a.filter((v) => v != null); return x.length ? x.reduce((s, v) => s + v, 0) / x.length : null; };
-  $('#dives').innerHTML = dives.length ? '<h2>Журнал занурень</h2><ul>' + dives.slice().reverse().map((d) => {
-    const iso = (t) => new Date(t).toISOString();
-    const idx = d.data.time.map((t, i) => [iso(t), i]).filter(([s]) => s.startsWith(d.date) && s.slice(11, 16) >= d.from.slice(0, 2) + ':00' && s.slice(11, 16) < d.to).map(([, i]) => i);
-    const hs = hourlyScores(d.data, 'spear');
-    const at = (k) => avg(idx.map((i) => d.data[k][i]));
-    const score = avg(idx.map((i) => hs[i].score));
-    return `<li><b>${d.date.slice(8)}.${d.date.slice(5, 7)}.${d.date.slice(0, 4)}</b> · ${esc(d.place.name)} · ${d.from}–${d.to}
-      <span class="stars">${'★'.repeat(d.rating)}${'☆'.repeat(5 - d.rating)}</span><br>
-      <span class="sub">Модель ${score == null ? '—' : Math.round(score)} · хвиля ${fmt(at('wave'), ' м')} / ${fmt(at('period'), ' с', 0)} · вітер ${fmt(at('wind'), ' м/с')}
-      · течія ${fmt(at('current'), ' м/с')} · вода ${fmt(at('sst'), '°')}</span>${d.note ? `<br>${esc(d.note)}` : ''}</li>`;
-  }).join('') + '</ul>' : '';
-}
-
 function setPlace(p) { place = p; store.set('place', p); $('#results').innerHTML = ''; load(); }
 
 // Only width matters: mobile browsers fire resize on scroll (URL bar), which would reset the hover.
 addEventListener('resize', () => daily.length && Math.max(280, $('#detail').clientWidth) !== W && render());
-$('#days').addEventListener('click', (e) => {
+document.addEventListener('click', (e) => {
   const b = e.target.closest('.day');
-  if (b) { selected = +b.dataset.i; render(); }
+  if (b) { selected = b.dataset.k; render(); }
 });
 document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => { mode = b.dataset.mode; store.set('mode', mode); load(); }));
 $('#search').addEventListener('submit', async (e) => {
@@ -207,4 +201,4 @@ $('#geo').addEventListener('click', () => navigator.geolocation?.getCurrentPosit
 ));
 
 load();
-getJson(`dives.json${ver}`).then(renderDives).catch(() => {});
+getJson(`dives.json${ver}`).then((x) => { dives = x; render(); }).catch(() => {});

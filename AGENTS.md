@@ -11,7 +11,7 @@ Static web page that rates fishing conditions 0–100 per hour and per day (10-d
 - `index.html` — markup and styles.
 - `app.js` — rendering, interaction, localStorage.
 - `openmeteo.js` — Open-Meteo calls → hourly arrays for `score.js` (shared by `app.js` and `add-dive.mjs`).
-- `dives.json` — the user's dive log: date, from/to, place, rating 1–5, note and raw hourly data (day −3 … +1) so the current model re-scores it. Shown under the forecast. Calibration data for `MODEL.spear`.
+- `dives.json` — the user's dive log: date, from/to, place, rating 1–5, note and raw hourly data (day −3 … +1) so the current model and mode re-score it. Shown as day cards under the forecast strip; a card opens the full day (dive hours shaded on the chart). Calibration data for `MODEL.spear`.
 - `add-dive.mjs` — `node add-dive.mjs <date> <from> <to> <lat> <lon> <name> <rating> [note]` appends a dive. The user tells Claude, Claude runs it.
 - `score.js` — pure scoring functions. No DOM, no network. Everything here must be testable in Node.
 - `score.test.js` — `node score.test.js`, plain `node:assert`, synthetic data.

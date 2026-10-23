@@ -61,8 +61,8 @@
   .lvl { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
   .l0 { background: #0ca30c; } .l1 { background: #fab219; } .l2 { background: #ec835a; } .l3 { background: #d03b3b; }
   h2 { font-size: 16px; margin: 20px 0 8px; }
-  #dives ul { list-style: none; margin: 0; padding: 0; }
-  #dives li { padding: 8px 0; border-bottom: 1px solid var(--grid); }
+  #dives nav { display: flex; flex-wrap: wrap; gap: 6px; }
+  .mine { font-size: 10px; color: var(--text-2); }
   .warn { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--grid); border-left: 3px solid var(--text-2); border-radius: 6px; }
 </style>
 </head>
@@ -80,12 +80,12 @@
     <span class="seg"><button data-mode="sea">Море</button> <button data-mode="fresh">Прісна вода</button> <button data-mode="spear">Підвода</button></span>
   </div>
   <nav id="days"></nav>
+  <section id="dives"></section>
   <main id="detail"></main>
   <p id="status"></p>
-  <section id="dives"></section>
   <footer>Оцінка умов, а не ймовірність улову. Море / прісна вода: температура води, світанок і захід, хвилі, вітер, рух води, фаза Місяця.
     Підвода: лише світловий день; ранок і вечір, безпечна хвиля й вітер, каламуть від хвиль за останні дні, ріст хвилі перед штормом, температура, вихідні. Дані: Open-Meteo.</footer>
 </div>
-<script type="module" src="app.js?v=7"></script>
+<script type="module" src="app.js?v=8"></script>
 </body>
 </html>
