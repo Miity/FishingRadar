@@ -34,6 +34,8 @@ export const MODEL = {
     waves: { opt: 0.5, sigmaLow: 0.35, calmFloor: 0.7, cutoff: 0.9, steep: 0.1 }, // m
     wind: { mid: 7, steep: 1 },                    // m/s, logistic safety cut
     morning: { afterSunriseMin: 90, sigmaMin: 90, gain: 0.6 },
+    evening: { beforeSunsetMin: 60, sigmaMin: 75, gain: 0.6 }, // last light before the legal cut-off
+    preStorm: { aheadH: 12, scale: 0.3, gain: 0.3 },             // wave growth (m) ahead: swell stirs before the storm
     weekend: 0.9,                                  // more people in the water
     riseWarn: 0.4,                                 // m of wave growth within 3 h -> warning
     bestHours: 3,
@@ -48,7 +50,7 @@ export const MODEL = {
 };
 
 const MAX_PRODUCT = (1 + MODEL.light.gain) * MODEL.water.max * (1 + MODEL.moon.gain);
-const MAX_SPEAR = (1 + MODEL.spear.morning.gain) * (1 + MODEL.spear.gain);
+const MAX_SPEAR = (1 + Math.max(MODEL.spear.morning.gain, MODEL.spear.evening.gain)) * (1 + MODEL.spear.gain) * (1 + MODEL.spear.preStorm.gain);
 
 const gauss = (x, mu, sigma) => Math.exp(-0.5 * ((x - mu) / sigma) ** 2);
 const logistic = (x, mid, steep) => 1 / (1 + Math.exp((x - mid) / steep));
@@ -135,8 +137,11 @@ export function hourlyScores(d, mode) {
       const s = m.spear;
       const H = d.wave?.[i], later = d.wave?.[i + 3];
       const rise = ok(H) && ok(later) ? later - H : null;
-      const f = { light: 1, temp, waves: 1, wind: 1, turbidity: 1, weekend: 1 };
-      if (sun) f.light = 1 + s.morning.gain * gauss(t, sun[0] + s.morning.afterSunriseMin * 60e3, s.morning.sigmaMin * 60e3);
+      const f = { light: 1, temp, waves: 1, wind: 1, turbidity: 1, preStorm: 1, weekend: 1 };
+      if (sun) f.light = 1 + Math.max(
+        s.morning.gain * gauss(t, sun[0] + s.morning.afterSunriseMin * 60e3, s.morning.sigmaMin * 60e3),
+        s.evening.gain * gauss(t, sun[1] - s.evening.beforeSunsetMin * 60e3, s.evening.sigmaMin * 60e3),
+      );
       if (ok(H)) {
         const w = s.waves;
         const low = H < w.opt ? w.calmFloor + (1 - w.calmFloor) * gauss(H, w.opt, w.sigmaLow) : 1;
@@ -144,6 +149,8 @@ export function hourlyScores(d, mode) {
       }
       if (ok(d.wind[i])) f.wind = logistic(d.wind[i], s.wind.mid, s.wind.steep);
       f.turbidity = 1 + s.gain * (1 - Math.exp(-turb[i].m / s.memoryScale));
+      const ahead = (d.wave ?? []).slice(i + 1, i + 1 + s.preStorm.aheadH).filter(ok);
+      if (ok(H) && ahead.length) f.preStorm = 1 + s.preStorm.gain * (1 - Math.exp(-Math.max(0, Math.max(...ahead) - H) / s.preStorm.scale));
       if ([0, 6].includes(new Date(t).getUTCDay())) f.weekend = s.weekend;
       const night = sun && (t < sun[0] || t > sun[1]);
       const product = Object.values(f).reduce((a, b) => a * b, 1);

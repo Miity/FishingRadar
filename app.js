@@ -22,7 +22,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const MOON = ['молодик', 'молодий серп', 'перша чверть', 'зростаючий', 'повня', 'спадний', 'остання чверть', 'старий серп'];
 const FACTORS = {
   light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', moon: 'Фаза Місяця',
-  turbidity: 'Каламуть від хвиль', weekend: 'Вихідні',
+  turbidity: 'Каламуть від хвиль', preStorm: 'Перед штормом', weekend: 'Вихідні',
 };
 const LEVELS = ['легко', 'середньо', 'складно', 'небезпечно'];
 const CAUSE = { waves: ['хвиля', ' м', 1], wind: ['вітер', ' м/с', 0], current: ['течія', ' м/с', 1] };
@@ -129,7 +129,7 @@ function showFactors(h) {
     temp: fmt(h.waterTemp, ' °C'), waves: fmt(r.wave, ' м'), wind: fmt(r.wind, ' м/с'),
     turbidity: h.ub == null ? '' : `дно ${h.ub.toFixed(2)} м/с`,
   };
-  const names = { ...FACTORS, ...(mode === 'spear' && { light: 'Ранок' }) };
+  const names = { ...FACTORS, ...(mode === 'spear' && { light: 'Ранок / вечір' }) };
   $('#factors').innerHTML = `<tr><th>${hh(h.t)} · оцінка ${h.score}${h.night ? ' (ніч: заборонено)' : ''}</th><th></th><th>Множник</th></tr>` +
     Object.keys(h.f).map((k) => `<tr><td>${names[k]}</td><td>${extra[k] ?? ''}</td><td>×${h.f[k].toFixed(2)}</td></tr>`).join('') +
     (h.diff ? `<tr><td>Складність</td><td colspan="2">${diffText(h.diff)}</td></tr>` : '');

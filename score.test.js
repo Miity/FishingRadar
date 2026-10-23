@@ -94,6 +94,16 @@ const chop = spear((i) => (i >= 24 && i < 36 ? [0.8, 4] : [0.3, 4]));
 assert.ok(at(swell, 1, 11).f.turbidity > at(chop, 1, 11).f.turbidity + 0.1);
 assert.ok(at(swell, 1, 11).score > at(chop, 1, 11).score);
 
+// Last light before sunset (17:30 here) beats midday.
+assert.ok(at(plain, 1, 16).score > at(plain, 1, 12).score + 10);
+
+// Pre-storm: waves growing within 12 h add a bonus; flat sea and missing data stay neutral.
+const building = spear((i) => (i < 40 ? [0.4, 5] : [1.2, 7]));
+assert.ok(at(building, 1, 12).f.preStorm > 1.25);
+assert.ok(at(building, 1, 12).score > at(spear(() => [0.4, 5]), 1, 12).score);
+assert.equal(at(plain, 1, 12).f.preStorm, 1);
+assert.equal(at(hourlyScores(base({ wave: time.map(() => null) }), 'spear'), 1, 12).f.preStorm, 1);
+
 // A little wave is better than flat calm.
 assert.ok(at(plain, 1, 9).score > at(spear(() => [0, 4]), 1, 9).score);
 
