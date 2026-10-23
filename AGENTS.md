@@ -21,7 +21,7 @@ Split a file only when one of these fires (no judgment calls):
 
 ## Data sources (Open-Meteo, free, CORS-enabled, no key)
 - Forecast `api.open-meteo.com/v1/forecast`: `temperature_2m`, `wind_speed_10m` (m/s), daily `sunrise`/`sunset`; `past_days=3` for lag features.
-- Marine `marine-api.open-meteo.com/v1/marine`: `sea_surface_temperature`, `wave_height`, `sea_level_height_msl` (includes tides). Values are null inland — every factor must degrade to neutral (1.0) on missing data.
+- Marine `marine-api.open-meteo.com/v1/marine`: `sea_surface_temperature`, `wave_height`, `wave_period`, `sea_level_height_msl` (includes tides). Values are null inland — every factor must degrade to neutral (1.0) on missing data.
 - Geocoding `geocoding-api.open-meteo.com/v1/search`.
 - Moon phase is computed locally (synodic month from a reference new moon).
 
@@ -36,6 +36,15 @@ Evidence-based, not solunar. Literature review (2010+) summary:
 Form: log-linear (GLM-style) — hourly score is a **product of multipliers**, normalized to 0–100. Daily score = mean of the best 6 hours.
 All weights and optima live in one `MODEL` constant in `score.js` — that is the calibration knob. Thermal optima are placeholders until calibrated with per-species data (e.g. FishBase) or the user's catch log.
 Present the result as a rating of conditions, never as a catch probability (ML studies reach R² ≈ 0.2 at best).
+
+### Spearfishing mode (`'spear'`, `MODEL.spear`)
+Shore-entry breath-hold spearfishing. Built from the user's field notes (Gaeta) plus evidence; thresholds are unmeasured and must be calibrated with a dive log.
+- Night = score 0: spearfishing is banned from sunset to sunrise in Italy (DPR 1639/1968, art. 129).
+- Best: still-turbid water (fish see the diver late) — the first calm morning after a storm, or just before a storm when long swell already stirs the bottom. Clear water on day 2 is worse. Fish wariness also drops after days without hunters (Sbragaglia et al. 2018, flight initiation distance).
+- Turbidity proxy: near-bottom orbital velocity `u_b = πH / (T·sinh(kh))` at depth 5 m (Eckart's approximation for k). Memory `M` = exponentially decayed (12 h) sum of `max(0, u_b − 0.2 m/s)`; multiplier `1 + 0.8·(1 − exp(−M/5))`.
+- Current waves are a safety gate with an optimum (~0.5 m, flat calm ≈ ×0.8, ×0.5 at 0.9 m); wind logistic around 7 m/s.
+- Morning bump ~1.5 h after sunrise; weekends ×0.9; moon and tide off. Day score = mean of the best 3 hours.
+- UI warns when waves rise ≥ 0.4 m within 3 h (safety, not part of the score).
 
 ## Conventions
 - Code, identifiers, comments: English. UI text: Ukrainian.

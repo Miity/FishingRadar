@@ -57,6 +57,7 @@
   td:first-child, th:first-child { text-align: left; }
   #status, footer { color: var(--text-2); font-size: 13px; }
   details { margin-top: 12px; }
+  .warn { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--grid); border-left: 3px solid var(--text-2); border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -70,15 +71,16 @@
   <ul id="results"></ul>
   <div class="row">
     <span id="place"></span>
-    <span class="seg"><button data-mode="sea">Море</button> <button data-mode="fresh">Прісна вода</button></span>
+    <span class="seg"><button data-mode="sea">Море</button> <button data-mode="fresh">Прісна вода</button> <button data-mode="spear">Підвода</button></span>
   </div>
   <nav id="days"></nav>
   <main id="detail"></main>
   <p id="status"></p>
-  <footer>Оцінка умов, а не ймовірність улову. Враховано: температура води, світанок і захід, хвилі, вітер, рух води, фаза Місяця. Дані: Open-Meteo.</footer>
+  <footer>Оцінка умов, а не ймовірність улову. Море / прісна вода: температура води, світанок і захід, хвилі, вітер, рух води, фаза Місяця.
+    Підвода: лише світловий день; ранок, безпечна хвиля й вітер, каламуть від хвиль за останні дні, температура, вихідні. Дані: Open-Meteo.</footer>
 </div>
 <script type="module">
-import { hourlyScores, dailyScores, moonPhase, label, stars } from './score.js';
+import { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } from './score.js';
 
 const HOUR = 3600e3, DAYS = 10;
 const $ = (s) => document.querySelector(s);
@@ -98,7 +100,10 @@ const fmt = (v, unit, d = 1) => (v == null ? '—' : v.toFixed(d) + unit);
 const status = (s) => ($('#status').textContent = s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const MOON = ['молодик', 'молодий серп', 'перша чверть', 'зростаючий', 'повня', 'спадний', 'остання чверть', 'старий серп'];
-const FACTORS = { light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', moon: 'Фаза Місяця' };
+const FACTORS = {
+  light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', moon: 'Фаза Місяця',
+  turbidity: 'Каламуть від хвиль', weekend: 'Вихідні',
+};
 
 async function load() {
   status('Завантаження…');
@@ -108,8 +113,8 @@ async function load() {
     const common = { latitude: place.lat, longitude: place.lon, timezone: 'auto', past_days: 3, forecast_days: DAYS };
     const [fc, marine] = await Promise.all([
       getJson(api('api.open-meteo.com', 'forecast', { ...common, hourly: 'temperature_2m,wind_speed_10m', daily: 'sunrise,sunset', wind_speed_unit: 'ms' })),
-      mode === 'sea'
-        ? getJson(api('marine-api.open-meteo.com', 'marine', { ...common, hourly: 'sea_surface_temperature,wave_height,sea_level_height_msl' })).catch(() => null)
+      mode !== 'fresh'
+        ? getJson(api('marine-api.open-meteo.com', 'marine', { ...common, hourly: 'sea_surface_temperature,wave_height,wave_period,sea_level_height_msl' })).catch(() => null)
         : null,
     ]);
     const idx = new Map((marine?.hourly?.time ?? []).map((s, i) => [s, i]));
@@ -121,15 +126,17 @@ async function load() {
       wind: fc.hourly.wind_speed_10m,
       sst: fromMarine('sea_surface_temperature'),
       wave: fromMarine('wave_height'),
+      period: fromMarine('wave_period'),
       seaLevel: fromMarine('sea_level_height_msl'),
       sunrise: fc.daily.sunrise.map(ms),
       sunset: fc.daily.sunset.map(ms),
     };
     nowLocal = Date.now() + data.utcOffsetMs;
     const today = new Date(nowLocal).toISOString().slice(0, 10);
-    daily = dailyScores(hourlyScores(data, mode)).filter((d) => d.day >= today).slice(0, DAYS);
+    const best = mode === 'spear' ? MODEL.spear.bestHours : MODEL.bestHours;
+    daily = dailyScores(hourlyScores(data, mode), best).filter((d) => d.day >= today).slice(0, DAYS);
     selected = 0;
-    const noSea = mode === 'sea' && data.sst.every((v) => v == null) && data.wave.every((v) => v == null);
+    const noSea = mode !== 'fresh' && data.sst.every((v) => v == null) && data.wave.every((v) => v == null);
     status(noSea ? 'Морських даних для цієї точки немає: хвилі й рух води не враховано, температура води — за повітрям.' : '');
     render();
   } catch (e) {
@@ -154,6 +161,7 @@ function render() {
       <span><span class="stars">${'★'.repeat(stars(d.score))}${'☆'.repeat(4 - stars(d.score))}</span><br>
       <span class="sub">${label(d.score)} активність · Місяць: ${MOON[Math.round(phase * 8) % 8]}</span></span></div>
     <div class="sub">Найкращий час: ${windows(d.hours).join(', ')}</div>
+    ${riseWarning(d.hours)}
     <div class="chart">${chart(d.hours)}<div id="tip"></div></div>
     <table id="factors"></table>
     <details><summary>Таблиця по годинах</summary><table>
@@ -166,8 +174,14 @@ function render() {
 
 const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i] }; };
 
+function riseWarning(hs) {
+  const h = hs.find((x) => !x.night && x.rise >= MODEL.spear.riseWarn);
+  return h ? `<p class="warn">⚠ Хвиля зростає: +${h.rise.toFixed(1)} м за 3 год від ${hh(h.t)}. Не заходьте у воду на підйомі хвилі.</p>` : '';
+}
+
 function windows(hs) {
-  const cut = 0.85 * Math.max(...hs.map((h) => h.score)), out = [];
+  const max = Math.max(...hs.map((h) => h.score)), cut = 0.85 * max, out = [];
+  if (max === 0) return ['умови непридатні'];
   for (const h of hs) {
     if (h.score < cut) continue;
     const last = out.at(-1);
@@ -179,9 +193,13 @@ function windows(hs) {
 
 function showFactors(h) {
   const r = raw(h.t);
-  const extra = { temp: fmt(h.waterTemp, ' °C'), waves: fmt(r.wave, ' м'), wind: fmt(r.wind, ' м/с') };
-  $('#factors').innerHTML = `<tr><th>${hh(h.t)} · оцінка ${h.score}</th><th></th><th>Множник</th></tr>` +
-    Object.entries(FACTORS).map(([k, name]) => `<tr><td>${name}</td><td>${extra[k] ?? ''}</td><td>×${h.f[k].toFixed(2)}</td></tr>`).join('');
+  const extra = {
+    temp: fmt(h.waterTemp, ' °C'), waves: fmt(r.wave, ' м'), wind: fmt(r.wind, ' м/с'),
+    turbidity: h.ub == null ? '' : `дно ${h.ub.toFixed(2)} м/с`,
+  };
+  const names = { ...FACTORS, ...(mode === 'spear' && { light: 'Ранок' }) };
+  $('#factors').innerHTML = `<tr><th>${hh(h.t)} · оцінка ${h.score}${h.night ? ' (ніч: заборонено)' : ''}</th><th></th><th>Множник</th></tr>` +
+    Object.keys(h.f).map((k) => `<tr><td>${names[k]}</td><td>${extra[k] ?? ''}</td><td>×${h.f[k].toFixed(2)}</td></tr>`).join('');
 }
 
 // Chart geometry in CSS pixels; W follows the container so text stays 11px on phones.

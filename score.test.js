@@ -1,6 +1,6 @@
 // Run: node score.test.js
 import assert from 'node:assert/strict';
-import { hourlyScores, dailyScores, moonPhase } from './score.js';
+import { hourlyScores, dailyScores, moonPhase, bottomVelocity } from './score.js';
 
 const HOUR = 3600e3;
 const start = Date.UTC(2026, 9, 20); // local midnight, "local as UTC"
@@ -60,5 +60,49 @@ assert.ok(at(shock, 2, 12).f.temp < at(calm, 2, 12).f.temp);
 const daily = dailyScores(calm);
 assert.equal(daily.length, 4);
 assert.equal(daily[0].hours.length, 24);
+
+// --- Spearfishing mode ---
+
+// Near-bottom orbital velocity at 5 m: chop barely stirs, long pre-storm swell does.
+assert.ok(Math.abs(bottomVelocity(0.5, 3, 5) - 0.11) < 0.01);
+assert.ok(Math.abs(bottomVelocity(0.6, 10, 5) - 0.40) < 0.01);
+assert.ok(Math.abs(bottomVelocity(2, 7, 5) - 1.27) < 0.01);
+
+// Waves/periods per hour from a function of the hour index.
+const sea = (fn) => {
+  const w = time.map((_, i) => fn(i));
+  return base({ wave: w.map((x) => x[0]), period: w.map((x) => x[1]) });
+};
+const spear = (fn) => hourlyScores(sea(fn), 'spear');
+const plain = spear(() => [0.5, 4]);
+const afterStorm = spear((i) => (i >= 24 && i < 48 ? [2, 7] : [0.5, 4])); // storm on day 1
+
+// Night is closed by law.
+assert.equal(at(plain, 1, 2).score, 0);
+assert.equal(at(plain, 1, 22).score, 0);
+
+// During the storm: unsafe, near zero.
+assert.ok(at(afterStorm, 1, 10).score < 10);
+
+// First calm morning after the storm beats the same morning without one; day 2 has cleared.
+assert.ok(at(afterStorm, 2, 8).score > at(plain, 2, 8).score + 15);
+assert.ok(at(afterStorm, 3, 8).score < at(afterStorm, 2, 8).score);
+
+// Pre-storm long swell (same height, longer period) already stirs the bottom.
+const swell = spear((i) => (i >= 24 && i < 36 ? [0.8, 10] : [0.3, 4]));
+const chop = spear((i) => (i >= 24 && i < 36 ? [0.8, 4] : [0.3, 4]));
+assert.ok(at(swell, 1, 11).f.turbidity > at(chop, 1, 11).f.turbidity + 0.1);
+assert.ok(at(swell, 1, 11).score > at(chop, 1, 11).score);
+
+// A little wave is better than flat calm.
+assert.ok(at(plain, 1, 9).score > at(spear(() => [0, 4]), 1, 9).score);
+
+// Rising waves are flagged.
+const rising = spear((i) => [i < 33 ? 0.3 : 0.9, 6]);
+assert.ok(at(rising, 1, 8).rise >= 0.4);
+
+// Spear day score uses the best 3 hours.
+assert.equal(dailyScores(plain, 3)[1].score, Math.round(
+  plain.slice(24, 48).map((h) => h.score).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b) / 3));
 
 console.log('score.test.js: all checks passed');
