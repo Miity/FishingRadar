@@ -8,7 +8,8 @@ Static web page that rates fishing conditions 0–100 per hour and per day (10-d
 - Add a dependency only when a few lines of code can't do the job. Pin exact CDN versions if one is ever added.
 
 ## Files
-- `index.html` — UI, styles, data fetching, rendering.
+- `index.html` — markup and styles.
+- `app.js` — data fetching, rendering, interaction (owns the API and localStorage).
 - `score.js` — pure scoring functions. No DOM, no network. Everything here must be testable in Node.
 - `score.test.js` — `node score.test.js`, plain `node:assert`, synthetic data.
 
