@@ -37,6 +37,13 @@ export const MODEL = {
     weekend: 0.9,                                  // more people in the water
     riseWarn: 0.4,                                 // m of wave growth within 3 h -> warning
     bestHours: 3,
+    // Difficulty, separate from the score. Lower bounds of Medium / Hard / Dangerous.
+    // ponytail: shore-entry guesses (finned swimmer holds ~0.5-0.7 m/s); calibrate with the user.
+    difficulty: {
+      waves: [0.3, 0.6, 1.0],                      // m
+      wind: [4, 7, 10],                            // m/s
+      current: [0.2, 0.4, 0.7],                    // m/s
+    },
   },
 };
 
@@ -58,6 +65,15 @@ export function bottomVelocity(H, T, h) {
   const x = ((2 * Math.PI) / T) ** 2 * h / 9.81;
   const kh = x / Math.sqrt(Math.tanh(x));
   return (Math.PI * H) / (T * Math.sinh(kh));
+}
+
+// Worst of waves / wind / current wins: { level: 0 easy .. 3 dangerous, cause, value }.
+export function difficulty(H, wind, current) {
+  const bounds = MODEL.spear.difficulty;
+  return [['waves', H], ['wind', wind], ['current', current]]
+    .filter(([, v]) => ok(v))
+    .map(([cause, value]) => ({ level: bounds[cause].filter((b) => value >= b).length, cause, value }))
+    .reduce((a, b) => (b.level > a.level ? b : a), { level: 0, cause: null, value: null });
 }
 
 const dayKey = (t) => new Date(t).toISOString().slice(0, 10);
@@ -132,7 +148,8 @@ export function hourlyScores(d, mode) {
       const night = sun && (t < sun[0] || t > sun[1]);
       const product = Object.values(f).reduce((a, b) => a * b, 1);
       const score = night ? 0 : Math.round(Math.min(100, (100 * product) / MAX_SPEAR));
-      return { t, score, f, waterTemp, night: !!night, ub: turb[i].ub, rise };
+      const diff = difficulty(H, d.wind[i], d.current?.[i]);
+      return { t, score, f, waterTemp, night: !!night, ub: turb[i].ub, rise, diff };
     }
 
     const f = { light: 1, temp, waves: 1, wind: 1, water: 1, moon: 1 };
@@ -158,7 +175,8 @@ export function hourlyScores(d, mode) {
   });
 }
 
-// Groups hours by local date. Day score = mean of the best `best` hours.
+// Groups hours by local date. Day score = mean of the best `best` hours;
+// day difficulty (spear) = worst difficulty among those hours.
 export function dailyScores(hours, best = MODEL.bestHours) {
   const days = new Map();
   for (const h of hours) {
@@ -167,8 +185,10 @@ export function dailyScores(hours, best = MODEL.bestHours) {
     days.get(k).push(h);
   }
   return [...days].map(([day, hs]) => {
-    const top = hs.map((h) => h.score).sort((a, b) => b - a).slice(0, best);
-    return { day, score: Math.round(top.reduce((a, b) => a + b, 0) / top.length), hours: hs };
+    const top = [...hs].sort((a, b) => b.score - a.score).slice(0, best);
+    const score = Math.round(top.reduce((a, h) => a + h.score, 0) / top.length);
+    const diff = top[0].diff && top.map((h) => h.diff).reduce((a, b) => (b.level > a.level ? b : a));
+    return { day, score, hours: hs, diff };
   });
 }
 

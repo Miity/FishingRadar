@@ -1,6 +1,6 @@
 // Run: node score.test.js
 import assert from 'node:assert/strict';
-import { hourlyScores, dailyScores, moonPhase, bottomVelocity } from './score.js';
+import { hourlyScores, dailyScores, moonPhase, bottomVelocity, difficulty } from './score.js';
 
 const HOUR = 3600e3;
 const start = Date.UTC(2026, 9, 20); // local midnight, "local as UTC"
@@ -104,5 +104,21 @@ assert.ok(at(rising, 1, 8).rise >= 0.4);
 // Spear day score uses the best 3 hours.
 assert.equal(dailyScores(plain, 3)[1].score, Math.round(
   plain.slice(24, 48).map((h) => h.score).sort((a, b) => b - a).slice(0, 3).reduce((a, b) => a + b) / 3));
+
+// Difficulty: 0 easy .. 3 dangerous, worst factor wins, missing data is ignored.
+assert.equal(difficulty(0.2, 3, 0.1).level, 0);
+assert.deepEqual(difficulty(0.3, 3, 0.1), { level: 1, cause: 'waves', value: 0.3 });
+assert.equal(difficulty(0.2, 3, 0.5).cause, 'current');
+assert.equal(difficulty(0.2, 3, 0.5).level, 2);
+assert.deepEqual(difficulty(0.2, 11, null), { level: 3, cause: 'wind', value: 11 });
+assert.deepEqual(difficulty(null, null, null), { level: 0, cause: null, value: null });
+
+// Day difficulty = worst among the best hours; spear hours carry it, other modes don't.
+const strong = hourlyScores({ ...sea(() => [0.5, 4]), current: time.map((t) => (t === start + 33 * HOUR ? 0.8 : 0.1)) }, 'spear');
+const strongDay = dailyScores(strong, 3)[1];
+const bestHours = [...strongDay.hours].sort((a, b) => b.score - a.score).slice(0, 3);
+assert.equal(strongDay.diff.level, Math.max(...bestHours.map((h) => h.diff.level)));
+assert.equal(at(strong, 1, 9).diff.cause, 'current');
+assert.equal(dailyScores(calm)[0].diff, undefined);
 
 console.log('score.test.js: all checks passed');

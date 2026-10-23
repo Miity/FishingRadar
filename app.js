@@ -24,6 +24,11 @@ const FACTORS = {
   light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', moon: 'Фаза Місяця',
   turbidity: 'Каламуть від хвиль', weekend: 'Вихідні',
 };
+const LEVELS = ['легко', 'середньо', 'складно', 'небезпечно'];
+const CAUSE = { waves: ['хвиля', ' м', 1], wind: ['вітер', ' м/с', 0], current: ['течія', ' м/с', 1] };
+const causeText = (x) => { const [what, unit, dec] = CAUSE[x.cause]; return `${what} ${x.value.toFixed(dec)}${unit}`; };
+const diffText = (x) => (x.cause ? `${LEVELS[x.level]} · ${causeText(x)}` : LEVELS[x.level]);
+const diffBadge = (x) => `<span class="df"><i class="lvl l${x.level}"></i>${LEVELS[x.level]}</span>`;
 
 async function load() {
   status('Завантаження…');
@@ -34,7 +39,7 @@ async function load() {
     const [fc, marine] = await Promise.all([
       getJson(api('api.open-meteo.com', 'forecast', { ...common, hourly: 'temperature_2m,wind_speed_10m', daily: 'sunrise,sunset', wind_speed_unit: 'ms' })),
       mode !== 'fresh'
-        ? getJson(api('marine-api.open-meteo.com', 'marine', { ...common, hourly: 'sea_surface_temperature,wave_height,wave_period,sea_level_height_msl' })).catch(() => null)
+        ? getJson(api('marine-api.open-meteo.com', 'marine', { ...common, hourly: 'sea_surface_temperature,wave_height,wave_period,sea_level_height_msl,ocean_current_velocity' })).catch(() => null)
         : null,
     ]);
     const idx = new Map((marine?.hourly?.time ?? []).map((s, i) => [s, i]));
@@ -48,6 +53,7 @@ async function load() {
       wave: fromMarine('wave_height'),
       period: fromMarine('wave_period'),
       seaLevel: fromMarine('sea_level_height_msl'),
+      current: fromMarine('ocean_current_velocity').map((v) => (v == null ? null : v / 3.6)), // km/h -> m/s
       sunrise: fc.daily.sunrise.map(ms),
       sunset: fc.daily.sunset.map(ms),
     };
@@ -70,7 +76,7 @@ function render() {
     const wd = i === 0 ? 'Сьогодні' : dt.toLocaleDateString('uk', { weekday: 'short', timeZone: 'UTC' });
     return `<button class="day${i === selected ? ' sel' : ''}" data-i="${i}" aria-label="${wd} ${dt.getUTCDate()}: ${d.score}">
       <span class="wd">${wd}</span><span class="dn">${dt.getUTCDate()}</span><span class="sc">${d.score}</span>
-      <span class="bar"><i style="height:${d.score}%"></i></span></button>`;
+      <span class="bar"><i style="height:${d.score}%"></i></span>${d.diff ? diffBadge(d.diff) : ''}</button>`;
   }).join('');
   const d = daily[selected];
   if (!d) return;
@@ -81,18 +87,20 @@ function render() {
       <span><span class="stars">${'★'.repeat(stars(d.score))}${'☆'.repeat(4 - stars(d.score))}</span><br>
       <span class="sub">${label(d.score)} активність · Місяць: ${MOON[Math.round(phase * 8) % 8]}</span></span></div>
     <div class="sub">Найкращий час: ${windows(d.hours).join(', ')}</div>
+    ${d.diff ? `<div class="sub">Складність: ${diffBadge(d.diff)}${d.diff.cause ? ` · ${causeText(d.diff)}` : ''}</div>` : ''}
     ${riseWarning(d.hours)}
     <div class="chart">${chart(d.hours)}<div id="tip"></div></div>
     <table id="factors"></table>
     <details><summary>Таблиця по годинах</summary><table>
-      <tr><th>Година</th><th>Оцінка</th><th>Вода</th><th>Вітер</th><th>Хвилі</th></tr>
-      ${d.hours.map((h) => { const r = raw(h.t); return `<tr><td>${hh(h.t)}</td><td>${h.score}</td><td>${fmt(h.waterTemp, '°')}</td><td>${fmt(r.wind, ' м/с')}</td><td>${fmt(r.wave, ' м')}</td></tr>`; }).join('')}
+      <tr><th>Година</th><th>Оцінка</th><th>Вода</th><th>Вітер</th><th>Хвилі</th>${d.diff ? '<th>Течія</th><th>Складність</th>' : ''}</tr>
+      ${d.hours.map((h) => { const r = raw(h.t); return `<tr><td>${hh(h.t)}</td><td>${h.score}</td><td>${fmt(h.waterTemp, '°')}</td><td>${fmt(r.wind, ' м/с')}</td><td>${fmt(r.wave, ' м')}</td>${
+        h.diff ? `<td>${fmt(r.current, ' м/с')}</td><td>${LEVELS[h.diff.level]}</td>` : ''}</tr>`; }).join('')}
     </table></details>`;
   showFactors(best);
   bindHover(d.hours);
 }
 
-const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i] }; };
+const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i], current: data.current[i] }; };
 
 function riseWarning(hs) {
   if (mode !== 'spear') return '';
@@ -123,7 +131,8 @@ function showFactors(h) {
   };
   const names = { ...FACTORS, ...(mode === 'spear' && { light: 'Ранок' }) };
   $('#factors').innerHTML = `<tr><th>${hh(h.t)} · оцінка ${h.score}${h.night ? ' (ніч: заборонено)' : ''}</th><th></th><th>Множник</th></tr>` +
-    Object.keys(h.f).map((k) => `<tr><td>${names[k]}</td><td>${extra[k] ?? ''}</td><td>×${h.f[k].toFixed(2)}</td></tr>`).join('');
+    Object.keys(h.f).map((k) => `<tr><td>${names[k]}</td><td>${extra[k] ?? ''}</td><td>×${h.f[k].toFixed(2)}</td></tr>`).join('') +
+    (h.diff ? `<tr><td>Складність</td><td colspan="2">${diffText(h.diff)}</td></tr>` : '');
 }
 
 // Chart geometry in CSS pixels; W follows the container so text stays 11px on phones.
@@ -177,7 +186,8 @@ function bindHover(hs) {
 
 function setPlace(p) { place = p; store.set('place', p); $('#results').innerHTML = ''; load(); }
 
-addEventListener('resize', () => daily.length && render());
+// Only width matters: mobile browsers fire resize on scroll (URL bar), which would reset the hover.
+addEventListener('resize', () => daily.length && Math.max(280, $('#detail').clientWidth) !== W && render());
 $('#days').addEventListener('click', (e) => {
   const b = e.target.closest('.day');
   if (b) { selected = +b.dataset.i; render(); }

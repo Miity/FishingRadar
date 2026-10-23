@@ -22,7 +22,7 @@ Split a file only when one of these fires (no judgment calls):
 
 ## Data sources (Open-Meteo, free, CORS-enabled, no key)
 - Forecast `api.open-meteo.com/v1/forecast`: `temperature_2m`, `wind_speed_10m` (m/s), daily `sunrise`/`sunset`; `past_days=3` for lag features.
-- Marine `marine-api.open-meteo.com/v1/marine`: `sea_surface_temperature`, `wave_height`, `wave_period`, `sea_level_height_msl` (includes tides). Values are null inland — every factor must degrade to neutral (1.0) on missing data.
+- Marine `marine-api.open-meteo.com/v1/marine`: `sea_surface_temperature`, `wave_height`, `wave_period`, `sea_level_height_msl` (includes tides), `ocean_current_velocity` (km/h). Values are null inland — every factor must degrade to neutral (1.0) on missing data.
 - Geocoding `geocoding-api.open-meteo.com/v1/search`.
 - Moon phase is computed locally (synodic month from a reference new moon).
 
@@ -46,6 +46,7 @@ Shore-entry breath-hold spearfishing. Built from the user's field notes (Gaeta) 
 - Current waves are a safety gate with an optimum (~0.5 m, flat calm ≈ ×0.8, ×0.5 at 0.9 m); wind logistic around 7 m/s.
 - Morning bump ~1.5 h after sunrise; weekends ×0.9; moon and tide off. Day score = mean of the best 3 hours.
 - UI warns when waves rise ≥ 0.4 m within 3 h (safety, not part of the score).
+- Difficulty (separate from the score): easy / medium / hard / dangerous per hour = worst of waves (0.3 / 0.6 / 1.0 m), wind (4 / 7 / 10 m/s), current (0.2 / 0.4 / 0.7 m/s); day difficulty = worst among the best 3 hours. Current is Open-Meteo `ocean_current_velocity` (km/h → m/s, ~8 km model grid: no rips or local surge).
 
 ## Conventions
 - Code, identifiers, comments: English. UI text: Ukrainian.
