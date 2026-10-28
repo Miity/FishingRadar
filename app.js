@@ -1,7 +1,7 @@
 // UI: rendering, interaction, localStorage. Scoring lives in score.js, Open-Meteo calls in openmeteo.js.
 // Same ?v= as app.js (set in index.html), so cached modules never mix with a new app.js.
 const ver = new URL(import.meta.url).search;
-const { MODEL, hourlyScores, dailyScores, moonPhase, label, stars } = await import(`./score.js${ver}`);
+const { MODEL, hourlyScores, dailyScores, moonPhase, tideRate, label, stars } = await import(`./score.js${ver}`);
 const { api, getJson, fetchConditions } = await import(`./openmeteo.js${ver}`);
 
 const HOUR = 3600e3, DAYS = 10;
@@ -21,7 +21,7 @@ const status = (s) => ($('#status').textContent = s);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const MOON = ['молодик', 'молодий серп', 'перша чверть', 'зростаючий', 'повня', 'спадний', 'остання чверть', 'старий серп'];
 const FACTORS = {
-  light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', moon: 'Фаза Місяця',
+  light: 'Світанок / захід', temp: 'Температура води', waves: 'Хвилі', wind: 'Вітер', water: 'Рух води', tide: 'Приплив', moon: 'Фаза Місяця',
   turbidity: 'Каламуть від хвиль', preStorm: 'Перед штормом', weekend: 'Вихідні',
 };
 const LEVELS = ['легко', 'середньо', 'складно', 'небезпечно'];
@@ -79,15 +79,16 @@ function render() {
     <div class="chart">${chart(d.hours, v)}<div id="tip"></div></div>
     <table id="factors"></table>
     <details><summary>Таблиця по годинах</summary><table>
-      <tr><th>Година</th><th>Оцінка</th><th>Вода</th><th>Вітер</th><th>Хвилі</th>${d.diff ? '<th>Течія</th><th>Складність</th>' : ''}</tr>
-      ${d.hours.map((h) => { const r = raw(h.t); return `<tr><td>${hh(h.t)}</td><td>${h.score}</td><td>${fmt(h.waterTemp, '°')}</td><td>${fmt(r.wind, ' м/с')}</td><td>${fmt(r.wave, ' м')}</td>${
+      <tr><th>Година</th><th>Оцінка</th><th>Вода</th><th>Вітер</th><th>Хвилі</th><th>Рівень</th>${d.diff ? '<th>Течія</th><th>Складність</th>' : ''}</tr>
+      ${d.hours.map((h) => { const r = raw(h.t); return `<tr><td>${hh(h.t)}</td><td>${h.score}</td><td>${fmt(h.waterTemp, '°')}</td><td>${fmt(r.wind, ' м/с')}</td><td>${fmt(r.wave, ' м')}</td><td>${r.tide}</td>${
         h.diff ? `<td>${fmt(r.current, ' м/с')}</td><td>${LEVELS[h.diff.level]}</td>` : ''}</tr>`; }).join('')}
     </table></details>`;
   showFactors(best);
   bindHover(d.hours);
 }
 
-const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i], current: data.current[i] }; };
+const tideText = (v) => (v == null ? '—' : Math.abs(v) < 0.01 ? '— стоїть' : v > 0 ? '↑ приплив' : '↓ відплив');
+const raw = (t) => { const i = data.time.indexOf(t); return { wind: data.wind[i], wave: data.wave[i], current: data.current[i], tide: tideText(tideRate(data.seaLevel, i)) }; };
 
 function riseWarning(hs) {
   if (mode !== 'spear') return '';
@@ -114,6 +115,7 @@ function showFactors(h) {
   const r = raw(h.t);
   const extra = {
     temp: fmt(h.waterTemp, ' °C'), waves: fmt(r.wave, ' м'), wind: fmt(r.wind, ' м/с'),
+    tide: r.tide,
     turbidity: h.ub == null ? '' : `дно ${h.ub.toFixed(2)} м/с`,
   };
   const names = { ...FACTORS, ...(mode === 'spear' && { light: 'Ранок / вечір' }) };

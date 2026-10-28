@@ -1,6 +1,6 @@
 // Run: node score.test.js
 import assert from 'node:assert/strict';
-import { hourlyScores, dailyScores, moonPhase, bottomVelocity, difficulty } from './score.js';
+import { hourlyScores, dailyScores, moonPhase, bottomVelocity, difficulty, tideRate } from './score.js';
 
 const HOUR = 3600e3;
 const start = Date.UTC(2026, 9, 20); // local midnight, "local as UTC"
@@ -43,6 +43,12 @@ dailyScores(calm).forEach((d, i) => assert.ok(storm[i].score < d.score));
 // Slack water (tide turning) scores lower on the water factor than mid-tide flow.
 const flows = calm.slice(24, 48).map((h) => h.f.water);
 assert.ok(Math.min(...flows) < 0.9 && Math.max(...flows) > 1.15);
+
+// Tide direction: flood gets the bonus, ebb and slack stay neutral.
+const level = base({}).seaLevel;
+calm.forEach((h, i) => (tideRate(level, i) > 0 ? assert.ok(h.f.tide > 1) : assert.equal(h.f.tide, 1)));
+assert.ok(Math.max(...calm.map((h) => h.f.tide)) > 1.09);
+assert.equal(tideRate(null, 3), null);
 
 // Freshwater / inland: no marine data -> neutral marine factors, air proxy for temperature.
 const fresh = hourlyScores(base({ sst: time.map(() => null), wave: time.map(() => null), seaLevel: null }), 'fresh');
@@ -95,7 +101,7 @@ assert.ok(at(swell, 1, 11).f.turbidity > at(chop, 1, 11).f.turbidity + 0.1);
 assert.ok(at(swell, 1, 11).score > at(chop, 1, 11).score);
 
 // Last light before sunset (17:30 here) beats midday.
-assert.ok(at(plain, 1, 16).score > at(plain, 1, 12).score + 10);
+assert.ok(at(plain, 1, 16).f.light > at(plain, 1, 12).f.light + 0.3);
 
 // Pre-storm: waves growing within 12 h add a bonus; flat sea and missing data stay neutral.
 const building = spear((i) => (i < 40 ? [0.4, 5] : [1.2, 7]));
@@ -130,5 +136,9 @@ const bestHours = [...strongDay.hours].sort((a, b) => b.score - a.score).slice(0
 assert.equal(strongDay.diff.level, Math.max(...bestHours.map((h) => h.diff.level)));
 assert.equal(at(strong, 1, 9).diff.cause, 'current');
 assert.equal(dailyScores(calm)[0].diff, undefined);
+
+// Spear: flood bonus up to x1.2, moon factor as in fishing mode.
+assert.ok(plain.some((h) => h.f.tide > 1.19) && plain.some((h) => h.f.tide === 1));
+assert.ok(plain.every((h) => h.f.moon >= 0.9 && h.f.moon <= 1.1));
 
 console.log('score.test.js: all checks passed');

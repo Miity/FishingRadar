@@ -37,6 +37,8 @@ Evidence-based, not solunar. Literature review (2010+) summary:
 - Weak and species-dependent: moon phase → small weight, peaks at new AND full moon (`cos(4πφ)`).
 - No direct effect in peer-reviewed tests: barometric pressure, solunar major/minor periods → not used.
 
+Tide: `water` = flow speed (slack ×0.8 … fastest ×1.2), plus `tide` = flood bonus up to ×1.1 (`MODEL.rising`), ebb neutral. Rate = central difference of `sea_level_height_msl`.
+
 Form: log-linear (GLM-style) — hourly score is a **product of multipliers**, normalized to 0–100. Daily score = mean of the best 6 hours.
 All weights and optima live in one `MODEL` constant in `score.js` — that is the calibration knob. Thermal optima are placeholders until calibrated with per-species data (e.g. FishBase) or the user's catch log.
 Present the result as a rating of conditions, never as a catch probability (ML studies reach R² ≈ 0.2 at best).
@@ -48,7 +50,8 @@ Shore-entry breath-hold spearfishing. Built from the user's field notes (Gaeta) 
 - Turbidity proxy: near-bottom orbital velocity `u_b = πH / (T·sinh(kh))` at depth 5 m (Eckart's approximation for k). Memory `M` = exponentially decayed (12 h) sum of `max(0, u_b − 0.2 m/s)`; multiplier `1 + 0.8·(1 − exp(−M/5))`.
 - Current waves are a safety gate with an optimum (~0.5 m, flat calm ≈ ×0.8, ×0.5 at 0.9 m); wind logistic around 7 m/s.
 - Pre-storm: wave growth within the next 12 h (max ahead − now) → `1 + 0.3·(1 − exp(−Δ/0.3 m))`; neutral on missing data.
-- Light: morning bump ~1.5 h after sunrise or evening bump ~1 h before sunset (the larger wins), both ×1.6 max; weekends ×0.9; moon and tide off. Day score = mean of the best 3 hours.
+- Light: morning bump ~1.5 h after sunrise or evening bump ~1 h before sunset (the larger wins), both ×1.6 max; weekends ×0.9.
+- Tide: rising water (flood) bonus up to ×1.2 at the day's fastest rise, ebb and slack neutral (user's choice: fish come to the rocks on the flood). Moon: same `cos(4πφ)` factor as fishing mode. Day score = mean of the best 3 hours.
 - UI warns when waves rise ≥ 0.4 m within 3 h (safety, not part of the score).
 - Difficulty (separate from the score): easy / medium / hard / dangerous per hour = worst of waves (0.3 / 0.6 / 1.0 m), wind (4 / 7 / 10 m/s), current (0.2 / 0.4 / 0.7 m/s); day difficulty = worst among the best 3 hours. Current is Open-Meteo `ocean_current_velocity` (km/h → m/s, ~8 km model grid: no rips or local surge).
 

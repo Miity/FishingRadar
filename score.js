@@ -19,6 +19,7 @@ export const MODEL = {
   waves: { opt: 0.6, sigma: 0.7, floor: 0.4 },     // m, parabolic optimum
   wind: { calm: 8, scale: 4 },                     // m/s, penalty only above `calm`
   water: { min: 0.8, max: 1.2 },                   // slack water -> fastest flow of the day
+  rising: 0.1,                                     // flood tide bonus at the day's fastest rise: fish move inshore
   moon: { gain: 0.1 },                             // weak, peaks at new and full moon
   bestHours: 6,
 
@@ -36,6 +37,7 @@ export const MODEL = {
     morning: { afterSunriseMin: 90, sigmaMin: 90, gain: 0.6 },
     evening: { beforeSunsetMin: 60, sigmaMin: 75, gain: 0.6 }, // last light before the legal cut-off
     preStorm: { aheadH: 12, scale: 0.3, gain: 0.3 },             // wave growth (m) ahead: swell stirs before the storm
+    rising: 0.2,                                   // flood tide bonus: fish come to the rocks; ebb and slack neutral
     weekend: 0.9,                                  // more people in the water
     riseWarn: 0.4,                                 // m of wave growth within 3 h -> warning
     bestHours: 3,
@@ -49,8 +51,9 @@ export const MODEL = {
   },
 };
 
-const MAX_PRODUCT = (1 + MODEL.light.gain) * MODEL.water.max * (1 + MODEL.moon.gain);
-const MAX_SPEAR = (1 + Math.max(MODEL.spear.morning.gain, MODEL.spear.evening.gain)) * (1 + MODEL.spear.gain) * (1 + MODEL.spear.preStorm.gain);
+const MAX_PRODUCT = (1 + MODEL.light.gain) * MODEL.water.max * (1 + MODEL.rising) * (1 + MODEL.moon.gain);
+const MAX_SPEAR = (1 + Math.max(MODEL.spear.morning.gain, MODEL.spear.evening.gain)) * (1 + MODEL.spear.gain)
+  * (1 + MODEL.spear.preStorm.gain) * (1 + MODEL.spear.rising) * (1 + MODEL.moon.gain);
 
 const gauss = (x, mu, sigma) => Math.exp(-0.5 * ((x - mu) / sigma) ** 2);
 const logistic = (x, mid, steep) => 1 / (1 + Math.exp((x - mid) / steep));
@@ -80,6 +83,12 @@ export function difficulty(H, wind, current) {
 
 const dayKey = (t) => new Date(t).toISOString().slice(0, 10);
 
+// Sea-level change at hour i (m/h, central difference): + rising, - falling, null without data.
+export function tideRate(level, i) {
+  const a = level?.[i - 1], b = level?.[i + 1];
+  return ok(a) && ok(b) ? (b - a) / 2 : null;
+}
+
 function meanBack(arr, i, n) {
   let sum = 0, cnt = 0;
   for (let k = Math.max(0, i - n + 1); k <= i; k++) if (ok(arr[k])) { sum += arr[k]; cnt++; }
@@ -108,14 +117,14 @@ export function hourlyScores(d, mode) {
   const marine = mode !== 'fresh';
   const sunByDay = new Map(d.sunrise.map((sr, i) => [dayKey(sr), [sr, d.sunset[i]]]));
   const airProxy = d.time.map((_, i) => meanBack(d.airTemp, i, 72));
-  const flow = d.time.map((_, i) => {
-    const a = d.seaLevel?.[i - 1], b = d.seaLevel?.[i + 1];
-    return ok(a) && ok(b) ? Math.abs(b - a) / 2 : null;
-  });
+  const rate = d.time.map((_, i) => tideRate(d.seaLevel, i)); // m/h, + rising (flood), - falling (ebb)
   const maxFlow = new Map();
   d.time.forEach((t, i) => {
-    if (ok(flow[i])) maxFlow.set(dayKey(t), Math.max(maxFlow.get(dayKey(t)) ?? 0, flow[i]));
+    if (ok(rate[i])) maxFlow.set(dayKey(t), Math.max(maxFlow.get(dayKey(t)) ?? 0, Math.abs(rate[i])));
   });
+  // Share of the day's fastest flow that is rising water: 0 on ebb, slack or missing data.
+  const rise = (t, i) => { const top = maxFlow.get(dayKey(t)); return ok(rate[i]) && top > 0 ? Math.max(0, rate[i]) / top : 0; };
+  const moonF = (t) => 1 + m.moon.gain * Math.cos(4 * Math.PI * moonPhase(t - d.utcOffsetMs));
   const turb = mode === 'spear' ? turbidityMemory(d) : null;
 
   return d.time.map((t, i) => {
@@ -136,8 +145,8 @@ export function hourlyScores(d, mode) {
     if (mode === 'spear') {
       const s = m.spear;
       const H = d.wave?.[i], later = d.wave?.[i + 3];
-      const rise = ok(H) && ok(later) ? later - H : null;
-      const f = { light: 1, temp, waves: 1, wind: 1, turbidity: 1, preStorm: 1, weekend: 1 };
+      const waveRise = ok(H) && ok(later) ? later - H : null;
+      const f = { light: 1, temp, waves: 1, wind: 1, turbidity: 1, preStorm: 1, tide: 1 + s.rising * rise(t, i), moon: moonF(t), weekend: 1 };
       if (sun) f.light = 1 + Math.max(
         s.morning.gain * gauss(t, sun[0] + s.morning.afterSunriseMin * 60e3, s.morning.sigmaMin * 60e3),
         s.evening.gain * gauss(t, sun[1] - s.evening.beforeSunsetMin * 60e3, s.evening.sigmaMin * 60e3),
@@ -156,10 +165,10 @@ export function hourlyScores(d, mode) {
       const product = Object.values(f).reduce((a, b) => a * b, 1);
       const score = night ? 0 : Math.round(Math.min(100, (100 * product) / MAX_SPEAR));
       const diff = difficulty(H, d.wind[i], d.current?.[i]);
-      return { t, score, f, waterTemp, night: !!night, ub: turb[i].ub, rise, diff };
+      return { t, score, f, waterTemp, night: !!night, ub: turb[i].ub, rise: waveRise, diff };
     }
 
-    const f = { light: 1, temp, waves: 1, wind: 1, water: 1, moon: 1 };
+    const f = { light: 1, temp, waves: 1, wind: 1, water: 1, tide: 1, moon: moonF(t) };
     if (sun) {
       const s = m.light.sigmaMin * 60e3;
       f.light = 1 + m.light.gain * Math.max(gauss(t, sun[0], s), gauss(t, sun[1], s));
@@ -171,10 +180,10 @@ export function hourlyScores(d, mode) {
       f.wind = 1 / (1 + ((d.wind[i] - m.wind.calm) / m.wind.scale) ** 2);
     }
     const top = maxFlow.get(dayKey(t));
-    if (marine && ok(flow[i]) && top > 0) {
-      f.water = m.water.min + (m.water.max - m.water.min) * (flow[i] / top);
+    if (marine && ok(rate[i]) && top > 0) {
+      f.water = m.water.min + (m.water.max - m.water.min) * (Math.abs(rate[i]) / top);
+      f.tide = 1 + m.rising * rise(t, i);
     }
-    f.moon = 1 + m.moon.gain * Math.cos(4 * Math.PI * moonPhase(t - d.utcOffsetMs));
 
     const product = Object.values(f).reduce((a, b) => a * b, 1);
     const score = Math.round(Math.min(100, Math.max(0, (100 * product) / MAX_PRODUCT)));
